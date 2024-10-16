@@ -1,14 +1,10 @@
 from dataclasses import dataclass
-from functools import partial
-from typing import Callable, NamedTuple, Tuple
-import pdb
+from typing import Callable, NamedTuple
 
-import einops
 import jax
 import jax.numpy as jnp
-from blackjax.smc.resampling import stratified
 from jax.tree_util import register_pytree_node_class
-from jaxtyping import Array, PRNGKeyArray, PyTreeDef
+from jaxtyping import Array, PRNGKeyArray
 
 from diffuse.sde import SDE, SDEState, euler_maryama_step
 from diffuse.images import SquareMask
@@ -36,6 +32,7 @@ class CondSDE(SDE):
     """
     cond_sde.mask.restore act as the matrix A^T
     """
+
     mask: SquareMask
     tf: float
     score: Callable[[Array, float], Array]
@@ -87,7 +84,6 @@ class CondSDE(SDE):
         def reverse_diffusion(state):
             x, t = state
             return cond_reverse_diffusion(CondState(x, y, xi, t), self)
-
 
         x, _ = euler_maryama_step(
             SDEState(x, t), dt, key, revese_drift, reverse_diffusion

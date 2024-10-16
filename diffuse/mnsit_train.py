@@ -1,7 +1,5 @@
 import jax
 import jax.numpy as jnp
-import pdb
-import matplotlib.pyplot as plt
 import einops
 from diffuse.unet import UNet
 from diffuse.score_matching import score_match_loss
@@ -83,4 +81,4 @@ for epoch in range(n_epochs):
     if (epoch + 1) % 500 == 0:
         np.savez(f"ann_{epoch}.npz", params=params, ema_params=ema_params)
 
-np.savez(f"ann_end.npz", params=params, ema_params=ema_params)
+np.savez("ann_end.npz", params=params, ema_params=ema_params)

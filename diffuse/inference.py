@@ -1,6 +1,5 @@
 from functools import partial
 from typing import Tuple
-import pdb
 
 import jax
 import jax.experimental
@@ -10,7 +9,7 @@ from jaxtyping import Array, PRNGKeyArray
 import einops
 
 from diffuse.conditional import CondSDE
-from diffuse.sde import SDEState, euler_maryama_step, euler_maryama_step_array
+from diffuse.sde import SDEState, euler_maryama_step_array
 from diffuse.filter import stratified
 
 
@@ -113,7 +112,7 @@ def particle_step(
     sde_state = euler_maryama_step_array(
         sde_state, dt, rng_key, drift_x + drift_y, diffusion
     )
-    #weights = jax.vmap(logpdf, in_axes=(SDEState(0, None),))(sde_state)
+    # weights = jax.vmap(logpdf, in_axes=(SDEState(0, None),))(sde_state)
     weights = logpdf(sde_state, drift_x)
 
     _norm = jax.scipy.special.logsumexp(weights, axis=0)
@@ -200,7 +199,9 @@ def generate_cond_sampleV2(
             cond_sde=cond_sde,
             dt=dt,
         )
-        positions, weights = particle_step(sde_state, key, drift_past, cond_sde, dt, logpdf)
+        positions, weights = particle_step(
+            sde_state, key, drift_past, cond_sde, dt, logpdf
+        )
         return SDEState(positions, t + dt), weights
 
     # generate path for y
