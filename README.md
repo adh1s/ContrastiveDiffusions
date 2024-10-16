@@ -31,9 +31,10 @@ Code repository for the paper [Bayesian Experimental Design via Contrastive Diff
 
 # Comparison with random measurements:
 <p align="center">
-  <img src="img/comparison_1.png" width="100%" />
+  <img src="img/mnist_444/comparison.png" width="100%" />
   <img src="img/comparison_2.png" width="100%" />
   <img src="img/comparison_3.png" width="100%" />
+  <img src="img/comparison_1.png" width="100%" />
   <img src="img/comparison_4.png" width="100%" />
 </p>
 
