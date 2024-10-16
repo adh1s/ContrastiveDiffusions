@@ -3,15 +3,8 @@ This script is adapted from https://raw.githubusercontent.com/yiyixuxu/denoising
 under the Apache-2.0 license.
 
 - You may find a copy of the license in https://github.com/yiyixuxu/denoising-diffusion-flax/tree/main?tab=Apache-2.0-1-ov-file#readme.
-- The original author is https://github.com/yiyixuxu.
-- Modifications:
-    - Deleted the batch in time embedding.
-    - Added pixel_shuffle upsampling.
-    - Changed resize from 'nearest' to 'linear'.
-    - Removed assert statements.
-    - Removed "name".
-    - Used in-house sinusoidal_embedding.
-    - Some variable names refactorisation.
+- The original author are https://github.com/yiyixuxu and https://github.com/zgbkdlm/
+from https://github.com/zgbkdlm/fbs/nn
 """
 
 import jax

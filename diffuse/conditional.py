@@ -33,6 +33,9 @@ class CondState(NamedTuple):
 
 @dataclass
 class CondSDE(SDE):
+    """
+    cond_sde.mask.restore act as the matrix A^T
+    """
     mask: SquareMask
     tf: float
     score: Callable[[Array, float], Array]
@@ -85,9 +88,6 @@ class CondSDE(SDE):
             x, t = state
             return cond_reverse_diffusion(CondState(x, y, xi, t), self)
 
-        # jax.debug.print("meas{}\n", measure(xi, img, self.mask))
-        # jax.debug.print("y{}\n", y.shape)
-        # jax.debug.print("diff{}\n", measure(xi, img, self.mask) - y )
 
         x, _ = euler_maryama_step(
             SDEState(x, t), dt, key, revese_drift, reverse_diffusion
@@ -97,26 +97,19 @@ class CondSDE(SDE):
 
 
 def cond_reverse_drift(state: CondState, cond_sde: CondSDE) -> Array:
-    # stack together x and y and apply reverse drift
     x, y, xi, t = state
-    # img = restore(xi, x, cond_sde.mask, y)
-    # return cond_sde.reverse_drift(SDEState(img, t))
     drift_x = cond_sde.reverse_drift(SDEState(x, t))
     beta_t = cond_sde.beta(cond_sde.tf - t)
     meas_x = cond_sde.mask.measure(xi, x)
     alpha_t = jnp.exp(cond_sde.beta.integrate(0.0, t))
-    # here if needed we average over y
+
     drift_y = (
         beta_t * cond_sde.mask.restore(xi, jnp.zeros_like(x), y - meas_x) / alpha_t
     )
-    # f = lambda y: beta_t * (y - meas_x) / alpha_t
-    # drifts = jax.vmap(f)(y)
-    # drift_y = drifts.mean(axis=0)
     return drift_x + drift_y
 
 
 def cond_reverse_diffusion(state: CondState, cond_sde: CondSDE) -> Array:
-    # stack together x and y and apply reverse diffusion
     x, y, xi, t = state
     img = cond_sde.mask.restore(xi, x, y)
     return cond_sde.reverse_diffusion(SDEState(img, t))

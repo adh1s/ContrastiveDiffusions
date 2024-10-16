@@ -23,16 +23,11 @@ dt = tf / n_t
 xs = jax.random.permutation(key, xs, axis=0)
 data = einops.rearrange(xs, "b h w -> b h w 1")
 shape_sample = data.shape[1:]
-# plt.imshow(data[0], cmap='gray')
-# plt.show()
-# dt = jnp.linspace(0, 2.0, n_t)
-# dt = jnp.array([2.0 / n_t] * batch_size)
 
 beta = LinearSchedule(b_min=0.02, b_max=5.0, t0=0.0, T=2.0)
 sde = SDE(beta)
 
 nn_unet = UNet(dt, 64, upsampling="pixel_shuffle")
-# init_params = nn_unet.init(key, data[:batch_size], dt)
 init_params = nn_unet.init(
     key, jnp.ones((batch_size, *shape_sample)), jnp.ones((batch_size,))
 )
@@ -71,7 +66,6 @@ ema_state = ema_kernel.init(params)
 
 for epoch in range(n_epochs):
     subkey, key = jax.random.split(key)
-    # data = jax.random.permutation(subkey, data, axis=0)
     idx = jax.random.choice(
         subkey, data.shape[0], (nsteps_per_epoch, batch_size), replace=False
     )

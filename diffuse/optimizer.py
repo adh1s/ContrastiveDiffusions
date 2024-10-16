@@ -50,17 +50,14 @@ def information_gain(theta: Array, cntrst_theta: Array, design: Array, cond_sde)
     logprob_target = jax.vmap(logprob_y, in_axes=(None, 0, None, None))(
         cntrst_theta, y_ref, design, cond_sde
     )
-    # logprob_target = jax.scipy.special.logsumexp(logprob_target, )
     logprob_means = jnp.mean(logprob_target, axis=0, keepdims=True)
     log_weights = jax.lax.stop_gradient(logprob_target - logprob_means)
-    # _norm = jax.scipy.special.logsumexp(log_weights, keepdims=True)
     _norm = jax.scipy.special.logsumexp(log_weights, axis=1, keepdims=True)
     log_weights = log_weights - _norm
 
     weighted_logprobs = jnp.mean(log_weights + logprob_target, axis=1)
 
     return (logprob_ref - weighted_logprobs).mean(), y_ref
-    # return (logprob_ref - logprob_means).mean(), y_ref
 
 
 def update_joint(
@@ -163,8 +160,6 @@ def impl_step(
     cntrst_sde_state = SDEState(cntrst_thetas, ts)
 
     # update joint distribution
-    #   1 - conditional sde on joint -> samples theta
-    #   2 - get values y from samples of joint
     key_theta, key_cntrst = jax.random.split(rng_key)
 
     def step_joint(sde_state, ys, ys_next, key):
@@ -178,19 +173,12 @@ def impl_step(
     position, weights = jax.vmap(step_joint)(
         sde_state, past_y.position[:-1], past_y.position[1:], keys_time
     )
-    #jax.experimental.io_callback(plotter_line, None, position[:-1, 0], ordered=True)
-    #jax.experimental.io_callback(plotter_line, None, thetas[:, 0], ordered=True)
     thetas = jnp.concatenate([thetas[:2], position[:-1]])
-    #jax.experimental.io_callback(plotter_line, None, thetas[:, 0], ordered=True)
 
     # get ys
     ys = jax.vmap(cond_sde.mask.measure, in_axes=(None, 0))(design, thetas)
-    # keys = jax.random.split(key_y, ts.shape[0])
-    # ys = jax.vmap(cond_sde.path, in_axes=(0, 0, 0))(keys, state, ts)
 
     # update expected posterior
-    #   1 - use y values to update post
-    #   2 - Get samples contrastive theta
     def step_expected_posterior(cntrst_sde_state, ys, ys_next, y_measured, key):
         _, t = cntrst_sde_state
         positions, weights = update_expected_posterior(
@@ -208,17 +196,12 @@ def impl_step(
 
     keys_time_c = jax.random.split(key_cntrst, ts.shape[0] - 1)
     cntrst_sde_state = jax.tree_map(lambda x: x[1:], cntrst_sde_state)
-    # pdb.set_trace()
     position, weights_c = jax.vmap(step_expected_posterior)(
         cntrst_sde_state, ys[:-1], ys[1:], past_y.position[1:], keys_time_c
     )
     cntrst_thetas = jnp.concatenate([cntrst_thetas[:2], position[:-1]])
 
-    #jax.experimental.io_callback(plotter_line, None, thetas[:, 0])
-    #jax.experimental.io_callback(plotter_line, None, cntrst_thetas[:, 0])
     # get EIG gradient estimator
-    #  1 - evaluate score_f on thetas and contrastives_theta
-    #  2 - update design parameters with optax
     design, opt_state, ys = calculate_and_apply_gradient(
         thetas[-1], cntrst_thetas[-1], design, cond_sde, optx_opt, opt_state
     )
@@ -245,8 +228,6 @@ def impl_one_step(
     cntrst_sde_state = SDEState(cntrst_thetas, past_y.t)
 
     # update joint distribution
-    #   1 - conditional sde on joint -> samples theta
-    #   2 - get values y from samples of joint
     key_joint, key_cntrst = jax.random.split(rng_key, 2)
 
     def step_joint(sde_state, ys, ys_next, key):
@@ -265,8 +246,6 @@ def impl_one_step(
 
 
     # update expected posterior
-    #   1 - use y values to update post
-    #   2 - Get samples contrastive theta
     def step_expected_posterior(cntrst_sde_state, ys, ys_next, y_measured, key):
         _, t = cntrst_sde_state
         positions, weights = update_expected_posterior(
@@ -287,11 +266,7 @@ def impl_one_step(
         cntrst_sde_state, ys, ys_next, past_y.position, key_cntrst
     )
 
-    #plot = lambda _: jax.experimental.io_callback(plot_samples, None, thetas.position, cntrst_thetas.position, weights, weights_c, past_y.position, ys_next.mean(axis=0))
-    #jax.lax.cond(past_y.t > 1.98, lambda _: jax.experimental.io_callback(plot_top_samples, None, thetas.position, cntrst_thetas.position, weights, weights_c, past_y.position, ys_next.mean(axis=0)), lambda _: None, None)
     # get EIG gradient estimator
-    #  1 - evaluate score_f on thetas and contrastives_theta
-    #  2 - update design parameters with optax
     n = 50
     best_idx = jnp.argsort(weights)[-n:][::-1]
     best_idx_c = jnp.argsort(weights_c)[-n:][::-1]
@@ -305,7 +280,6 @@ def impl_one_step(
         return (design, opt_state), None
 
     design, opt_state = jax.lax.cond(past_y.t > 1.4, lambda _: jax.lax.scan(step, (design, opt_state), jnp.arange(100))[0], lambda _: calculate_and_apply_gradient( thetas.position, cntrst_thetas.position, design, cond_sde, optx_opt, opt_state)[:2], None)
-    #design, opt_state, _ = calculate_and_apply_gradient( thetas.position, cntrst_thetas.position, design, cond_sde, optx_opt, opt_state)
 
     return ImplicitState(thetas.position, weights, cntrst_thetas.position, weights_c, design, opt_state)
 
@@ -331,8 +305,6 @@ def impl_full_scan(
     cntrst_sde_state = SDEState(cntrst_thetas, 0.0)
 
     # update joint distribution
-    #   1 - conditional sde on joint -> samples theta
-    #   2 - get values y from samples of joint
     key_theta, key_cntrst, key_y = jax.random.split(rng_key, 3)
 
     def step_joint(state, itr):
@@ -346,7 +318,6 @@ def impl_full_scan(
         return (SDEState(positions, t + dt), weights), (positions, weights)
 
     keys_time = jax.random.split(key_theta, ts.shape[0] - 1)
-    # position, weights = jax.vmap(update_joint)(sde_state, past_y.position[:-1], past_y.position[1:], keys_time)
 
     ((thetas, _), weights), hist = jax.lax.scan(
         step_joint,
@@ -361,13 +332,8 @@ def impl_full_scan(
     thetas_hist = jnp.concatenate([thetas[None], thetas_hist])
 
     ys = jax.vmap(cond_sde.mask.measure, in_axes=(None, 0))(design, thetas_hist)
-    # ys = cond_sde.mask.measure(design, thetas)
-    # keys = jax.random.split(key_y, ts.shape[0])
-    # ys = jax.vmap(cond_sde.path, in_axes=(0, 0, 0))(keys, state, ts)
 
     # update expected posterior
-    #   1 - use y values to update post
-    #   2 - Get samples contrastive theta
     def step_expected_posterior(state, itr):
         cntrst_sde_state, weights = state
         _, t = cntrst_sde_state
@@ -395,8 +361,6 @@ def impl_full_scan(
     )
 
     # get EIG gradient estimator
-    #  1 - evaluate score_f on thetas and contrastives_theta
-    #  2 - update design parameters with optax
     design, opt_state, ys = calculate_and_apply_gradient(
         thetas, cntrst_thetas, design, cond_sde, optx_opt, opt_state
     )

@@ -35,7 +35,6 @@ class SquareMask:
         mask = jax.nn.sigmoid(
             (-jnp.maximum(y_dist, x_dist) + mask_half_size) / softness
         )
-        # return jnp.where(mask > 0.5, 1.0, 0.0)[..., None]
         return mask[..., None]
 
     def measure_from_mask(self, hist_mask: Array, img: Array):
@@ -58,7 +57,6 @@ if __name__ == "__main__":
     xs = einops.rearrange(xs, "b h w -> b h w 1")
 
     x = xs[0]
-    # x = jax.random.normal(jax.random.PRNGKey(0), x.shape)
 
     mask = SquareMask(10, x.shape)
     xi = jnp.array([15.0, 15.0])

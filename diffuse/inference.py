@@ -94,11 +94,9 @@ def calculate_drift_expt_post(
     \beta(t)  \sum_{n=1}^N \nu_n \nabla_\thetab \log p(\yb_n^t|\thetab'_t, \xib)
     to add for conditional diffusioon
     """
-    # pdb.set_trace()
     drifts = jax.vmap(calculate_drift_y, in_axes=(None, None, None, 0))(
         cond_sde, sde_state, design, y
     )
-    # drifts = calculate_drift_y(cond_sde, t, xi, x, y)
     drift_y = drifts.mean(axis=0)
     return drift_y
 
@@ -126,10 +124,8 @@ def particle_step(
     n_particles = sde_state.position.shape[0]
     idx = stratified(rng_key, weights, n_particles)
 
-    #return sde_state.position, weights
     return jax.lax.cond(
         (ess_val < 0.6 * n_particles) & (ess_val > 0.2 * n_particles),
-        #(ess_val > 0.2 * n_particles),
         lambda x: (x[idx], weights[idx]),
         lambda x: (x, weights),
         sde_state.position,
@@ -152,13 +148,9 @@ def logpdf_change_y(
     alpha = jnp.sqrt(jnp.exp(cond_sde.beta.integrate(0.0, t)))
     cov = cond_sde.reverse_diffusion(x_sde_state) * jnp.sqrt(dt) + alpha
 
-    # mean = cond_sde.mask.measure(design, x + drift_x * dt)
     mean = cond_sde.mask.measure_from_mask(design, x + drift_x * dt)
     logsprobs = jax.scipy.stats.norm.logpdf(y_next, mean, cov)
     logsprobs = cond_sde.mask.measure_from_mask(design, logsprobs)
-    #jax.experimental.io_callback(plot_lines, None, logsprobs)
-    #jax.experimental.io_callback(sigle_plot, None, y_next)
-    #logsprobs = jax.vmap(cond_sde.mask.measure, in_axes=(None, 0))(design, logsprobs)
     logsprobs = einops.reduce(logsprobs, "t ... -> t ", "sum")
     return logsprobs
 
@@ -234,7 +226,6 @@ def generate_cond_sampleV2(
         key, u, u_next = itr
         keys = jax.random.split(key, n_ts)
         n_state = update_joint(state_xt, u, u_next, key)
-        # n_state = jax.vmap(update_joint, in_axes=(SDEState(None, 0), 0, 0, 0))(state_xt, u, u_next, keys)
         return n_state, n_state
 
     end_state, hist = jax.lax.scan(step, (state_x, weights), (keys, u_0Tm, u_1T))
