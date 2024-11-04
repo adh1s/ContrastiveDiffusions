@@ -44,11 +44,6 @@ Code repository for the paper [Bayesian Experimental Design via Contrastive Diff
 
 
 
-Forward / Reverse process diffusion process on mixtures:
-<p align="center">
-  <img src="img/backward_process.gif" width="380" />
-  <img src="img/forward_process.gif" width="380" />
-</p>
 
 For tests and plots of the diffusion on mixture of Gaussians:
 ```bash
