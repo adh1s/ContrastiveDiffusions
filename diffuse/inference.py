@@ -10,7 +10,7 @@ import einops
 
 from diffuse.conditional import CondSDE
 from diffuse.sde import SDEState, euler_maryama_step_array
-from diffuse.filter import stratified
+# from diffuse.filter import stratified
 
 
 def ess(log_weights: Array) -> float:

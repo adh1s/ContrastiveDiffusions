@@ -13,7 +13,8 @@ import matplotlib.pyplot as plt
 from jax_tqdm import scan_tqdm
 import datetime
 import einops
-
+import sys
+sys.path.append("./")
 from diffuse.sde import SDE, SDEState
 from diffuse.conditional import CondSDE
 from diffuse.plotting import log_samples, plotter_random, plot_comparison
@@ -30,7 +31,7 @@ SIZE = 7
 def initialize_experiment(key: PRNGKeyArray):
     # Load MNIST dataset
     data = np.load("dataset/mnist.npz")
-    xs = jnp.array(data["X"])
+    xs = jnp.array(data["x_train"])
     xs = xs.reshape(xs.shape[0], xs.shape[1], xs.shape[2], 1)  # Add channel dimension
 
     # Initialize parameters

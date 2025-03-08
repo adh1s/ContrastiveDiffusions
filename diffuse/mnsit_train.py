@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 import einops
+import sys
+sys.path.append("./")
 from diffuse.unet import UNet
 from diffuse.score_matching import score_match_loss
 from diffuse.sde import SDE, LinearSchedule
@@ -9,9 +11,13 @@ import numpy as np
 import optax
 from tqdm import tqdm
 
+print(jax.devices())
+
 data = jnp.load("dataset/mnist.npz")
 key = jax.random.PRNGKey(0)
-xs = data["X"]
+
+xs = jnp.concatenate([data["x_train"], data["x_test"]], axis=0)
+
 batch_size = 256
 n_epochs = 3500
 n_t = 256
