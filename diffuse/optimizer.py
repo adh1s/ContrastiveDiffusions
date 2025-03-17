@@ -34,13 +34,17 @@ def information_gain(theta: Array, cntrst_theta: Array, design: Array, cond_sde)
     Information gain estimator
     Estimator \sum_i log p(y_i | theta_i, design) - \sum_j w_{ij} log p(y_i | theta_j, design)
     """
-    # sample y from p(y, theta_)
+    # sample y ~ p(y | \theta, \design)
     y_ref = cond_sde.mask.measure(design, theta)
+    # calculate log p(y | \theta, \design)
     logprob_ref = logprob_y(theta, y_ref, design, cond_sde)
+    # calculate log p(y | \theta, \design) for all thetas
     logprob_target = jax.vmap(logprob_y, in_axes=(None, 0, None, None))(
         cntrst_theta, y_ref, design, cond_sde
     )
+
     logprob_means = jnp.mean(logprob_target, axis=0, keepdims=True)
+    # take away the mean to avoid numerical instability
     log_weights = jax.lax.stop_gradient(logprob_target - logprob_means)
     _norm = jax.scipy.special.logsumexp(log_weights, axis=1, keepdims=True)
     log_weights = log_weights - _norm
@@ -102,6 +106,7 @@ def update_expected_posterior(
     drift_past = calculate_past_contribution_score(
         cond_sde, cntrst_sde_state, mask_history, y_measured
     )
+    # why is there no SMC for the old quantities?
     drift_y = calculate_drift_expt_post(cond_sde, cntrst_sde_state, design, ys)
     logpdf = partial(
         logpdf_change_expected,
@@ -126,6 +131,8 @@ def calculate_and_apply_gradient(
     opt_state: optax.OptState,
 ):
     grad_xi_score = jax.grad(information_gain, argnums=2, has_aux=True)
+    # return the ys (which are calculated in information_gain)
+    # could use more thetas (increase N from 1?) for a better estimate?
     grad_xi, ys = grad_xi_score(thetas[-1], cntrst_thetas, design, cond_sde)
     updates, new_opt_state = optx_opt.update(grad_xi, opt_state, design)
     new_design = optax.apply_updates(design, updates)
@@ -151,7 +158,6 @@ def impl_step(
     sde_state = SDEState(thetas, ts)
     cntrst_sde_state = SDEState(cntrst_thetas, ts)
 
-    # update joint distribution
     key_theta, key_cntrst = jax.random.split(rng_key)
 
     def step_joint(sde_state, ys, ys_next, key):
@@ -167,10 +173,8 @@ def impl_step(
     )
     thetas = jnp.concatenate([thetas[:2], position[:-1]])
 
-    # get ys
     ys = jax.vmap(cond_sde.mask.measure, in_axes=(None, 0))(design, thetas)
 
-    # update expected posterior
     def step_expected_posterior(cntrst_sde_state, ys, ys_next, y_measured, key):
         _, t = cntrst_sde_state
         positions, weights = update_expected_posterior(
@@ -206,9 +210,11 @@ def impl_one_step(
     rng_key: PRNGKeyArray,
     past_y: SDEState,
     past_y_next: SDEState,
-    mask_history: Array,
+    mask_history: Array, # used for computing the posterior p(\theta|D_{k-1})
     cond_sde: CondSDE,
-    optx_opt: GradientTransformation,
+    optx_opt: GradientTransformation, 
+    single_step_ub,
+    inner_gradient_steps, 
 ):
     """
     Implicit step with one step update
@@ -234,11 +240,10 @@ def impl_one_step(
         sde_state, past_y.position, past_y_next.position, key_joint
     )
 
-    # get ys
     ys = cond_sde.mask.measure(design, thetas.position)
     ys_next = cond_sde.path(rng_key, SDEState(ys, past_y.t), past_y_next.t).position
+    # Above amounts to sampling p(\theta|d_{k-1})p(y_k|\theta, d_{k-1}) = p(\theta, y_k|d_{k-1}) 
 
-    # update expected posterior
     def step_expected_posterior(cntrst_sde_state, ys, ys_next, y_measured, key):
         _, t = cntrst_sde_state
         positions, weights = update_expected_posterior(
@@ -259,7 +264,7 @@ def impl_one_step(
         cntrst_sde_state, ys, ys_next, past_y.position, key_cntrst
     )
 
-    # get EIG gradient estimator
+    # Get EIG gradient estimator
     n = 50
     best_idx = jnp.argsort(weights)[-n:][::-1]
     best_idx_c = jnp.argsort(weights_c)[-n:][::-1]
@@ -274,13 +279,14 @@ def impl_one_step(
             optx_opt,
             opt_state,
         )
+        # taking more than 1 step here feels like a really dodgy thing to do?
         design = optax.projections.projection_box(design, 0.0, 28.0)
         return (design, opt_state), None
 
     design, opt_state = jax.lax.cond(
-        past_y.t > 1.4,
-        lambda _: jax.lax.scan(step, (design, opt_state), jnp.arange(100))[0],
-        lambda _: calculate_and_apply_gradient(
+        past_y.t > single_step_ub, 
+        lambda _: jax.lax.scan(step, (design, opt_state), jnp.arange(inner_gradient_steps,))[0], # past_y.t > single_step_ub (inner_steps steps)
+        lambda _: calculate_and_apply_gradient( # past_y.t <= single_step_ub  (1 step)
             thetas.position,
             cntrst_thetas.position,
             design,

@@ -2,11 +2,46 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 
-def metric_l2(ground_truth, state):
-    thetas, weights = state.thetas, state.weights
-    squared_norm = jnp.sum(jnp.square(thetas - ground_truth), axis=(1, 2, 3))
+def metric_l2(ground_truth, thetas, weights):
+    residual = thetas - ground_truth
+    squared_norm = jnp.sum(jnp.square(residual), axis=(1, 2, 3))
     return jnp.einsum("i, i ->", weights, squared_norm)
 
+
+def ssim_fn(image1, image2, C1=0.01**2, C2=0.03**2):
+    """
+    Computes SSIM between two grayscale images.
+    Assumes image1 and image2 are of same shape.
+    
+    Args:
+        image1: jnp.ndarray, shape (H, W)
+        image2: jnp.ndarray, shape (H, W)
+        C1: float, stability constant
+        C2: float, stability constant
+    
+    Returns:
+        Scalar SSIM value
+    """
+
+    # Means
+    mu1 = jnp.mean(image1)
+    mu2 = jnp.mean(image2)
+    # Variances
+    sigma1_sq = jnp.mean((image1 - mu1) ** 2)
+    sigma2_sq = jnp.mean((image2 - mu2) ** 2)
+    # Covariance
+    covariance = jnp.mean((image1 - mu1) * (image2 - mu2))
+    # SSIM formula
+    numerator = (2 * mu1 * mu2 + C1) * (2 * covariance + C2)
+    denominator = (mu1**2 + mu2**2 + C1) * (sigma1_sq + sigma2_sq + C2)
+    ssim = numerator / denominator
+
+    return ssim
+
+def metric_ssim(ground_truth, thetas, weights):
+    ssim = jnp.array([ssim_fn(ground_truth, theta) for theta in thetas])
+    print(ssim.shape)
+    return jnp.einsum("i, i ->", weights, ssim)
 
 def plot_comparison(ground_truth, state_random, state, y_random, y, logging_path):
     thetas, weights = state

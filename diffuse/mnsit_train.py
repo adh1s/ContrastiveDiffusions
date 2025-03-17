@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import einops
 import sys
+import os
 sys.path.append("./")
 from diffuse.unet import UNet
 from diffuse.score_matching import score_match_loss
@@ -10,8 +11,9 @@ from functools import partial
 import numpy as np
 import optax
 from tqdm import tqdm
-
-print(jax.devices())
+from diffuse.sde import SDE, SDEState
+import matplotlib.pyplot as plt
+import datetime
 
 data = jnp.load("dataset/mnist.npz")
 key = jax.random.PRNGKey(0)
@@ -23,10 +25,16 @@ n_epochs = 3500
 n_t = 256
 tf = 2.0
 dt = tf / n_t
+ts = jnp.linspace(0, tf, n_t)
+dts = jnp.diff(ts)
 
 xs = jax.random.permutation(key, xs, axis=0)
 data = einops.rearrange(xs, "b h w -> b h w 1")
 shape_sample = data.shape[1:]
+
+max_val = data.max()
+min_val = data.min() 
+data = (data - min_val) / (max_val - min_val) * 2 - 1
 
 beta = LinearSchedule(b_min=0.02, b_max=5.0, t0=0.0, T=2.0)
 sde = SDE(beta)
@@ -35,7 +43,6 @@ nn_unet = UNet(dt, 64, upsampling="pixel_shuffle")
 init_params = nn_unet.init(
     key, jnp.ones((batch_size, *shape_sample)), jnp.ones((batch_size,))
 )
-
 
 def weight_fun(t):
     int_b = sde.beta.integrate(t, 0).squeeze()
@@ -68,6 +75,39 @@ params = init_params
 opt_state = optimizer.init(params)
 ema_state = ema_kernel.init(params)
 
+# Plot code
+def plot(sample, dir_path, i):
+    _, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.imshow(sample.squeeze(), cmap="gray")
+    ax.axis("off")
+    plt.savefig(f"{dir_path}/sample_{i}.png")
+    plt.close()
+
+def plot_samples(key, dir_path, num_generations=2):
+    def nn_score(x, t):
+        return nn_unet.apply(params, x, t)
+
+    # Sampling code
+    init_samples = jax.random.normal(key, (num_generations, *shape_sample)) # Sample from prior     
+    tfs = jnp.zeros((num_generations,)) + tf
+
+    # Denoise
+    state_f = SDEState(position=init_samples, t=tfs)
+    revert_sde = partial(sde.reverso, score=nn_score, dts=dts)
+
+    # Split keys
+    keys = jax.random.split(key, num_generations)
+    state_f, history = jax.vmap(revert_sde)(keys, state_f)
+
+    # plot 
+    for i in range(num_generations):
+        plot(state_f.position[i], dir_path, i)
+
+# create samples dir from time
+now = datetime.datetime.now()
+dir_path = f"samples/{now.strftime('%Y-%m-%d_%H-%M-%S')}"
+os.makedirs(dir_path)
+
 for epoch in range(n_epochs):
     subkey, key = jax.random.split(key)
     idx = jax.random.choice(
@@ -86,5 +126,10 @@ for epoch in range(n_epochs):
 
     if (epoch + 1) % 500 == 0:
         np.savez(f"ann_{epoch}.npz", params=params, ema_params=ema_params)
+    
+    if (epoch + 1) % 50 == 0:
+        save_path = f"{dir_path}/{epoch}"
+        os.makedirs(save_path)
+        plot_samples(key, save_path, num_generations=2)
 
 np.savez("ann_end.npz", params=params, ema_params=ema_params)

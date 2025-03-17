@@ -17,33 +17,51 @@ import sys
 sys.path.append("./")
 from diffuse.sde import SDE, SDEState
 from diffuse.conditional import CondSDE
-from diffuse.plotting import log_samples, plotter_random, plot_comparison
+from diffuse.plotting import log_samples, plotter_random, plot_comparison, metric_l2, metric_ssim
 from diffuse.images import SquareMask
 from diffuse.inference import generate_cond_sampleV2
 from diffuse.optimizer import ImplicitState, impl_step, impl_one_step
 from diffuse.sde import LinearSchedule
 from diffuse.unet import UNet
-
+import json
 
 SIZE = 7
+SCORE_NETWORK = 'score_networks/ann_3499.npz'
+DATASET = 'dataset/mnist.npz'
 
+def save_results(l2_hist, ssim_hist, output_dir, seed, random=False):
+    os.makedirs(output_dir, exist_ok=True)
+    results = {
+        "l2_hist": l2_hist,
+        "ssim_hist": ssim_hist
+    }
+    if random:
+        output_file = os.path.join(output_dir, f"random_seed_{seed}.json")
+    else:
+        output_file = os.path.join(output_dir, f"seed_{seed}.json")
+
+    with open(output_file, "w") as f:
+        json.dump(results, f, indent=4)
+    print(f"Results saved to {output_file}")
 
 def initialize_experiment(key: PRNGKeyArray):
-    # Load MNIST dataset
-    data = np.load("dataset/mnist.npz")
-    xs = jnp.array(data["x_train"])
+    data = np.load(DATASET)
+    xs = jnp.concatenate([data["x_train"], data["x_test"]], axis=0)
+
     xs = xs.reshape(xs.shape[0], xs.shape[1], xs.shape[2], 1)  # Add channel dimension
+    # Center to [-1, 1]
+    xs = (xs - xs.min()) / (xs.max() - xs.min()) * 2 - 1
 
     # Initialize parameters
     tf = 2.0
-    n_t = 300
+    n_t = 256
 
     # Define beta schedule and SDE
     beta = LinearSchedule(b_min=0.02, b_max=5.0, t0=0.0, T=2.0)
 
     # Initialize ScoreNetwork
     score_net = UNet(tf / n_t, 64, upsampling="pixel_shuffle")
-    nn_trained = jnp.load("ann_2999.npz", allow_pickle=True)
+    nn_trained = jnp.load(SCORE_NETWORK, allow_pickle=True)
     params = nn_trained["params"].item()
 
     # Define neural network score function
@@ -115,6 +133,8 @@ def optimize_design_one_step(
     ts: Array,
     dt: float,
     cond_sde: CondSDE,
+    single_step_ub: int = 1.4, # original values
+    inner_gradient_steps: int = 100, # inner_steps to take t > single_step_ub
 ):
     opt_steps = ts.shape[0] - 1
     keys_opt = jax.random.split(key_step, opt_steps)
@@ -130,6 +150,8 @@ def optimize_design_one_step(
             mask_history,
             cond_sde=cond_sde,
             optx_opt=optimizer,
+            single_step_ub=single_step_ub,
+            inner_gradient_steps=inner_gradient_steps,
         )
         thetas, _, cntrst_thetas, _, design, *_ = new_state
         return new_state, (thetas, cntrst_thetas, design)
@@ -212,6 +234,7 @@ def main(
     plotter_theta: Callable,
     plotter_contrastive: Callable,
 ):
+    print('Optimizing design')
     key_init, key_step = jax.random.split(key)
 
     sde, cond_sde, mask, ground_truth, tf, n_t, nn_score = initialize_experiment(
@@ -237,8 +260,6 @@ def main(
     # init optimizer
     optimizer = optax.chain(optax.adam(learning_rate=0.1), optax.scale(-1))
     opt_state = optimizer.init(design)
-
-    ts = jnp.linspace(0, tf, n_t)
 
     # init thetas
     # thetas, cntrst_thetas = init_trajectory(key_init, sde, nn_score, n_samples, n_samples_cntrst, tf, ts, dts, ground_truth.shape)
@@ -272,6 +293,10 @@ def main(
     design_step = partial(
         optimize_design_one_step, optimizer=optimizer, ts=ts, dt=dt, cond_sde=cond_sde
     )
+
+    l2_hist = []
+    ssim_hist = []
+    
     for n_meas in range(num_meas):
         key_noise, key_opt, key_gen = jax.random.split(key_step, 3)
         # make noised path for measurements
@@ -281,6 +306,7 @@ def main(
             keys_noise, state_0, ts
         )
         past_y = SDEState(past_y.position[::-1], past_y.t)
+        # past_y contains a noisy trajectory of observations [i.e. y0 = A_{xi}\theta + noise, y_t = noised(y0)]
         # plotter_line(past_y.position)
 
         # optimize design
@@ -328,21 +354,12 @@ def main(
         )
 
         print(jnp.max(joint_y))
-        # plotter_line(optimal_state.thetas[-1, :])
-        # plotter_line(optimal_state.cntrst_thetas[-1, :])
-
-        # for i in range(10):
-        #   plotter_line(optimal_state.thetas[:, i])
-        #   plotter_line(optimal_state.cntrst_thetas[:, i])
 
         # reinitiazize implicit state
         design = jax.random.uniform(key_step, (2,), minval=0, maxval=28)
         opt_state = optimizer.init(design)
         key_t, key_c = jax.random.split(key_gen)
-        # thetas = generate_cond_sample(joint_y, optimal_state.design, key_t, cond_sde, ground_truth.shape, n_t, n_samples)[1][0]
-
-        # thetas = generate_cond_sampleV2(joint_y, mask_history, key_t, cond_sde, ground_truth.shape, n_t, n_samples)[1][0]
-        # cntrst_thetas = generate_cond_sampleV2(joint_y, mask_history, key_c, cond_sde, ground_truth.shape, n_t, n_samples_cntrst)[1][0]
+    
         key_step, _ = jax.random.split(key_step)
 
         thetas, cntrst_thetas = init_start_time(
@@ -350,13 +367,21 @@ def main(
         )
         implicit_state = ImplicitState(
             thetas, weights_0, cntrst_thetas, weights_c_0, design, opt_state
+
         )
+        
+        l2 = metric_l2(ground_truth, optimal_state.thetas[-1, :], optimal_state.weights)
+        ssim = metric_ssim(ground_truth, optimal_state.thetas[-1, :], optimal_state.weights)
+        
+        print('l2:', l2, 'ssim:', ssim)
+        l2_hist.append(l2)
+        ssim_hist.append(ssim)
 
-    return ground_truth, (optimal_state.thetas[-1, :], optimal_state.weights), joint_y
-
+    return ground_truth, (optimal_state.thetas[-1, :], optimal_state.weights), joint_y, l2_hist, ssim_hist
 
 # @jax.jit
 def main_random(key: PRNGKeyArray, num_meas: int, plotter_random: Callable):
+    print("Randomised designs")
     key_init, key_step = jax.random.split(key)
 
     sde, cond_sde, mask, ground_truth, tf, n_t, nn_score = initialize_experiment(
@@ -400,6 +425,10 @@ def main_random(key: PRNGKeyArray, num_meas: int, plotter_random: Callable):
     joint_y = y
     mask_history = mask.make(design)
     noiser = jax.jit(jax.vmap(sde.path, in_axes=(0, None, 0)))
+    
+    l2_hist = []
+    ssim_hist = []
+    
     for n_meas in range(num_meas):
         key_noise, key_opt, key_gen = jax.random.split(key_step, 3)
         # make noised path for measurements
@@ -440,21 +469,37 @@ def main_random(key: PRNGKeyArray, num_meas: int, plotter_random: Callable):
 
         key_step, _ = jax.random.split(key_step)
 
-    return ground_truth, optimal_state, joint_y
+        l2 = metric_l2(ground_truth, thetas.position, weights)
+        ssim_rand = metric_ssim(ground_truth, thetas.position, weights)
+        print('l2:', l2, 'ssim:', ssim_rand)
+        l2_hist.append(l2)
+        ssim_hist.append(ssim_rand)
+
+    return ground_truth, optimal_state, joint_y, l2_hist, ssim_hist
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rng_key", type=int, default=0)
-    parser.add_argument("--random", action="store_true")
-    parser.add_argument("--num_meas", type=int, default=3)
-    parser.add_argument("--prefix", type=str, default="")
+    parser.add_argument("--random", type=bool, default=True)
+    parser.add_argument("--num_meas", type=int, default=25)
+    parser.add_argument("--prefix", type=str, default="") 
+    parser.add_argument("--single_step_ub", type=float, default=1.4)
+    parser.add_argument("--inner_gradient_steps", type=int, default=100)
+    parser.add_argument("--device", type=str, default="gpu")
 
     args = parser.parse_args()
+
+    # Change device
+    if args.device == "cpu":
+        jax.config.update("jax_platform_name", "cpu")
+
     num_meas = args.num_meas
     key_int = args.rng_key
     random = args.random
-
+    single_step_ub = args.single_step_ub
+    inner_gradient_steps = args.inner_gradient_steps
+    
     rng_key = jax.random.PRNGKey(key_int)
     dir_path = f"runs/{args.prefix}/{key_int}_{datetime.datetime.now().strftime('%m-%d_%H-%M-%S')}"
 
@@ -471,9 +516,14 @@ if __name__ == "__main__":
         logging_path_random = f"{dir_path}/random"
         os.makedirs(logging_path_random, exist_ok=True)
         plotter_r = partial(plotter_random, logging_path=logging_path_random, size=SIZE)
-        ground_truth, state_random, y_random = main_random(rng_key, num_meas, plotter_r)
+        ground_truth, state_random, y_random, l2_hist_random, ssim_hist_random = main_random(rng_key, num_meas, plotter_r)
 
-    ground_truth, state, y = main(rng_key, num_meas, plotter_theta, plotter_contrastive)
-
+    ground_truth, state, y, l2_hist, ssim_hist = main(rng_key, num_meas, plotter_theta, plotter_contrastive,
+                                                     single_step_ub=single_step_ub, inner_gradient_steps=inner_gradient_steps)
     if random:
         plot_comparison(ground_truth, state_random, state, y_random, y, dir_path)
+    
+    # Save the metrics 
+    save_results(l2_hist, ssim_hist, f"runs/{args.prefix}/", key_int)
+    if random:
+        save_results(l2_hist_random, ssim_hist_random, f"runs/{args.prefix}/", key_int, random=True)

@@ -11,7 +11,7 @@ import einops
 from diffuse.conditional import CondSDE
 from diffuse.sde import SDEState, euler_maryama_step_array
 # from diffuse.filter import stratified
-
+from blackjax.smc.resampling import stratified
 
 def ess(log_weights: Array) -> float:
     return jnp.exp(log_ess(log_weights))
@@ -76,12 +76,12 @@ def calculate_past_contribution_score(
     x, t = sde_state
     beta_t = cond_sde.beta(cond_sde.tf - t)
     meas_x = cond_sde.mask.measure_from_mask(mask_history, x)
-    alpha_t = jnp.exp(cond_sde.beta.integrate(0.0, t))
+    alpha_t = jnp.exp(cond_sde.beta.integrate(0.0, t)) # what ?
     drift_y = (
         beta_t
         * cond_sde.mask.restore_from_mask(mask_history, jnp.zeros_like(x), (y - meas_x))
         / alpha_t
-    )
+    ) # "guidance term"
     return drift_y
 
 
@@ -124,6 +124,7 @@ def particle_step(
     idx = stratified(rng_key, weights, n_particles)
 
     return jax.lax.cond(
+        # where it is 1) helpful and 2) not harmful (diversity)
         (ess_val < 0.6 * n_particles) & (ess_val > 0.2 * n_particles),
         lambda x: (x[idx], weights[idx]),
         lambda x: (x, weights),

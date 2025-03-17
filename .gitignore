@@ -166,4 +166,8 @@ runs/*
 
 .idea/
 
-scripts/
+# anything that contains the word "samples" in it
+**/*samples*
+vae_samples-10/
+vae_samples-16/
+vae_samples-32/
