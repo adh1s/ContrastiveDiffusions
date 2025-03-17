@@ -35,10 +35,10 @@ cd $PATH_TO_GIT
 # Activate the Conda environment
 # source $PATH_TO_CONDA/bin/activate diffbed
 conda activate /data/localhost/not-backed-up/saravanan/miniconda3/envs/diffbed
+PYTHON_SCRIPT="examples/design_mnist.py"
 
 SEEDS=($(seq 0 25))
 NUM_MEAS=25
-
 # Test the (prescriped, all 100 steps, all 1 step) variants of the design
 SINGLE_STEP_UB_VALUES=(1.4 0 2)
 INNER_GRADIENT_STEPS_VALUES=(100 100 100)
@@ -58,6 +58,6 @@ for i in "${!SINGLE_STEP_UB_VALUES[@]}"; do
             --num_meas $NUM_MEAS \
             --single_step_ub $SINGLE_STEP_UB \
             --inner_gradient_steps $INNER_GRADIENT_STEPS \
-            --prefix "design_mnist_single_step_ub_${SINGLE_STEP_UB}_inner_steps_${INNER_GRADIENT_STEPS}" \
+            --prefix "design_mnist_single_step_ub_${SINGLE_STEP_UB}_inner_steps_${INNER_GRADIENT_STEPS}" 
     done
 done

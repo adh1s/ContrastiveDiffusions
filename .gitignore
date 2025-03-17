@@ -171,3 +171,10 @@ runs/*
 vae_samples-10/
 vae_samples-16/
 vae_samples-32/
+
+score_networks/ann_499.npz
+score_networks/ann_999.npz
+score_networks/ann_1499.npz
+score_networks/ann_1999.npz
+score_networks/ann_2499.npz
+score_networks/ann_2999.npz

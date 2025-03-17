@@ -233,6 +233,8 @@ def main(
     num_meas: int,
     plotter_theta: Callable,
     plotter_contrastive: Callable,
+    single_step_ub: float = 1.4,
+    inner_gradient_steps: int = 100,
 ):
     print('Optimizing design')
     key_init, key_step = jax.random.split(key)
@@ -291,7 +293,7 @@ def main(
     plt.show()
     # design_step = jax.jit(partial(optimize_design, optimizer=optimizer, ts=ts, dt=dt, cond_sde=cond_sde))
     design_step = partial(
-        optimize_design_one_step, optimizer=optimizer, ts=ts, dt=dt, cond_sde=cond_sde
+        optimize_design_one_step, optimizer=optimizer, ts=ts, dt=dt, cond_sde=cond_sde, single_step_ub=single_step_ub, inner_gradient_steps=inner_gradient_steps
     )
 
     l2_hist = []
